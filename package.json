@@ -1,0 +1,10 @@
+{
+  "name": "picture-words",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A browser game for practicing simple English object words by saying them out loud.",
+  "scripts": {
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Picture Words — Say What You See!</title>
+<style>
+  :root {
+    --green: #34c759;
+    --green-dark: #248a3d;
+    --red: #ff6b6b;
+    --red-dark: #d64545;
+    --ink: #2b2350;
+    --card-bg: #ffffff;
+    --accent: #6c5ce7;
+    --ring-track: #ece9ff;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Baloo 2", "Trebuchet MS", system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: linear-gradient(160deg, #b8e1ff 0%, #d9c8ff 45%, #ffd6ec 100%);
+    background-attachment: fixed;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #app { height: 100dvh; display: flex; flex-direction: column; }
+
+  /* ---------- Header ---------- */
+  header {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px;
+  }
+  header .title { font-size: clamp(18px, 4.5vw, 26px); font-weight: 800; letter-spacing: .5px; }
+  header .spacer { flex: 1; }
+  .icon-btn {
+    border: none; cursor: pointer;
+    width: 52px; height: 52px; border-radius: 18px;
+    font-size: 22px; font-weight: 800;
+    background: #ffffffcc; color: var(--ink);
+    box-shadow: 0 4px 0 #00000018;
+    display: grid; place-items: center;
+    transition: transform .08s ease;
+  }
+  .icon-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #00000018; }
+
+  /* ---------- Play area ---------- */
+  main {
+    flex: 1 1 auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 4px 16px;
+    min-height: 0;
+  }
+
+  .stage { position: relative; width: min(58vh, 80vw, 360px); aspect-ratio: 1; }
+  .ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 14; stroke-linecap: round; }
+  .ring .track { stroke: var(--ring-track); }
+  .ring .progress { stroke: var(--accent); transition: stroke .25s ease; }
+
+  .card {
+    position: absolute; inset: 9%;
+    background: var(--card-bg);
+    border-radius: 32px;
+    box-shadow: 0 14px 30px #5b4ba526, inset 0 -6px 0 #00000008;
+    display: grid; place-items: center;
+    font-weight: 800; line-height: 1;
+    font-size: min(30vh, 42vw, 190px);
+    color: var(--accent);
+  }
+  .card.correct { animation: pop .45s ease; }
+  .card.miss { animation: shake .45s ease; }
+  @keyframes pop { 0%{transform:scale(1)} 40%{transform:scale(1.12)} 100%{transform:scale(1)} }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-12px)} 40%{transform:translateX(12px)} 60%{transform:translateX(-8px)} 80%{transform:translateX(8px)} }
+
+  .seconds {
+    position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
+    font-size: 20px; font-weight: 800; color: var(--accent);
+    background: #fff; padding: 2px 14px; border-radius: 999px;
+    box-shadow: 0 4px 0 #00000012;
+  }
+
+  /* answer reveal (shown on a miss) */
+  .answer {
+    min-height: 30px; font-size: 24px; font-weight: 800; color: var(--accent);
+    letter-spacing: .5px;
+  }
+  .answer.miss { color: var(--red-dark); }
+  .answer.correct { color: var(--green-dark); }
+
+  /* mic + heard feedback */
+  .mic {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 15px; color: #5a5280;
+    min-height: 24px;
+  }
+  .mic .dot { width: 12px; height: 12px; border-radius: 50%; background: #c4bde8; }
+  .mic.live .dot { background: var(--green); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 0 #34c75966 } 50%{ box-shadow: 0 0 0 10px #34c75900 } }
+  .heard { color: var(--accent); font-style: italic; min-height: 20px; }
+
+  /* ---------- Buckets ---------- */
+  .buckets { flex: 0 0 auto; display: flex; gap: 12px; padding: 10px 14px 16px; }
+  .bucket {
+    flex: 1; border-radius: 22px; padding: 10px 12px;
+    background: #ffffffb0; box-shadow: 0 6px 0 #00000010;
+    display: flex; flex-direction: column; min-width: 0;
+  }
+  .bucket .head { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; }
+  .bucket .count {
+    margin-left: auto; font-size: 14px; background: #fff; border-radius: 999px;
+    padding: 1px 10px; min-width: 30px; text-align: center;
+  }
+  .bucket.green .head { color: var(--green-dark); }
+  .bucket.red .head { color: var(--red-dark); }
+  .chips {
+    display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px;
+    max-height: 64px; overflow-y: auto;
+  }
+  .chip {
+    width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+    font-size: 20px;
+    background: #fff; box-shadow: 0 2px 0 #00000012;
+    animation: drop .35s ease;
+  }
+  .bucket.green .chip { outline: 2px solid var(--green); }
+  .bucket.red .chip { outline: 2px solid var(--red); }
+  @keyframes drop { from{ transform: translateY(-12px) scale(.6); opacity:0 } to{ transform:none; opacity:1 } }
+
+  /* flying chip from card to bucket */
+  .fly-chip {
+    position: fixed; z-index: 50; pointer-events: none;
+    transform: translate(-50%, -50%);
+    font-size: 64px;
+    width: 84px; height: 84px; border-radius: 18px; display: grid; place-items: center;
+    background: #fff;
+    transition: transform .6s cubic-bezier(.5,0,.25,1), opacity .6s ease;
+  }
+  .fly-chip.green { outline: 4px solid var(--green); }
+  .fly-chip.red { outline: 4px solid var(--red); }
+
+  /* ---------- Overlays ---------- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: #2b235099; backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .panel {
+    background: #fff; border-radius: 28px; padding: 26px 24px;
+    width: min(460px, 100%); max-height: 92dvh; overflow-y: auto;
+    box-shadow: 0 24px 60px #00000040; text-align: center;
+  }
+  .panel h1 { margin: 4px 0 4px; font-size: 30px; }
+  .panel h2 { margin: 0 0 6px; font-size: 26px; }
+  .panel p { margin: 6px 0 16px; color: #5a5280; font-weight: 600; line-height: 1.4; }
+
+  .field { text-align: left; margin: 16px 0; }
+  .field > label { font-weight: 800; display: block; margin-bottom: 8px; }
+  .segmented { display: flex; gap: 8px; flex-wrap: wrap; }
+  .segmented button {
+    flex: 1; min-width: 64px; border: 3px solid #ece9ff; background: #f7f6ff;
+    color: var(--ink); font-weight: 800; font-size: 15px;
+    padding: 12px 8px; border-radius: 16px; cursor: pointer;
+    transition: all .12s ease;
+  }
+  .segmented button.sel { border-color: var(--accent); background: #efeaff; color: var(--accent); }
+
+  .toggle-row { display: flex; align-items: center; gap: 12px; }
+  .toggle-row label { font-weight: 800; flex: 1; }
+  .switch { position: relative; width: 56px; height: 32px; flex: 0 0 auto; }
+  .switch input { display: none; }
+  .switch span { position: absolute; inset: 0; background: #d9d4f3; border-radius: 999px; transition: .15s; cursor: pointer; }
+  .switch span::before { content:""; position:absolute; top:3px; left:3px; width:26px; height:26px; background:#fff; border-radius:50%; transition:.15s; }
+  .switch input:checked + span { background: var(--green); }
+  .switch input:checked + span::before { transform: translateX(24px); }
+
+  .big-btn {
+    border: none; cursor: pointer; width: 100%;
+    font-size: 22px; font-weight: 800; color: #fff;
+    padding: 16px; border-radius: 20px; margin-top: 8px;
+    background: var(--accent); box-shadow: 0 6px 0 #4a3bb0;
+    transition: transform .08s ease;
+  }
+  .big-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #4a3bb0; }
+  .big-btn.secondary { background: #ece9ff; color: var(--accent); box-shadow: 0 6px 0 #cfc8f5; }
+  .big-btn.secondary:active { box-shadow: 0 2px 0 #cfc8f5; }
+  .btn-row { display: flex; gap: 10px; }
+  .btn-row .big-btn { margin-top: 12px; }
+
+  .warn { background: #fff4f4; color: var(--red-dark); border-radius: 14px; padding: 10px 12px; font-weight: 700; font-size: 14px; margin-top: 8px; }
+  .hidden { display: none !important; }
+
+  .stats { display: flex; justify-content: center; gap: 22px; margin: 10px 0 4px; }
+  .stat { text-align: center; }
+  .stat b { display: block; font-size: 30px; color: var(--accent); }
+  .stat small { color: #8a83b0; font-weight: 700; }
+
+  #confetti { position: fixed; inset: 0; z-index: 99; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<canvas id="confetti"></canvas>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="title">🗣️ Say What You See!</div>
+    <div class="spacer"></div>
+    <button class="icon-btn" id="pauseBtn" title="Pause">⏸</button>
+    <button class="icon-btn" id="stopBtn" title="Stop">✕</button>
+  </header>
+
+  <main>
+    <div class="stage">
+      <svg class="ring" viewBox="0 0 200 200">
+        <circle class="track" cx="100" cy="100" r="92"></circle>
+        <circle class="progress" id="ringProgress" cx="100" cy="100" r="92"></circle>
+      </svg>
+      <div class="card" id="card">🐶</div>
+      <div class="seconds" id="seconds">4</div>
+    </div>
+
+    <div class="answer" id="answer">&nbsp;</div>
+    <div class="mic" id="micStatus"><span class="dot"></span><span id="micText">Listening…</span></div>
+    <div class="heard" id="heard">&nbsp;</div>
+  </main>
+
+  <div class="buckets">
+    <div class="bucket green">
+      <div class="head">✅ Got it!<span class="count" id="greenCount">0</span></div>
+      <div class="chips" id="greenChips"></div>
+    </div>
+    <div class="bucket red">
+      <div class="head">🔁 Try again<span class="count" id="redCount">0</span></div>
+      <div class="chips" id="redChips"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- Start overlay ---------- -->
+<div class="overlay show" id="startOverlay">
+  <div class="panel">
+    <h1>🗣️ Say What You See!</h1>
+    <p>A picture pops up — say its name out loud before the timer runs out. Get them all into the green bucket to win! Synonyms count too (a 🐸 can be a “frog” or a “toad”).</p>
+
+    <div class="field">
+      <label>Pictures</label>
+      <div class="segmented" id="catSeg">
+        <button data-cat="all" class="sel">🎲<br><small>All</small></button>
+        <button data-cat="animals">🐶<br><small>Animals</small></button>
+        <button data-cat="household">🪑<br><small>Home</small></button>
+        <button data-cat="machines">🚗<br><small>Machines</small></button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Time per picture</label>
+      <div class="segmented" id="timeSeg">
+        <button data-time="3">3s</button>
+        <button data-time="4" class="sel">4s</button>
+        <button data-time="5">5s</button>
+        <button data-time="6">6s</button>
+      </div>
+    </div>
+
+    <div class="field toggle-row">
+      <label for="sayMiss">Say the answer when missed</label>
+      <span class="switch"><input type="checkbox" id="sayMiss" checked><span></span></span>
+    </div>
+
+    <div id="unsupported" class="warn hidden">
+      ⚠️ This browser doesn't support speech recognition. Please open this in <b>Google Chrome</b> or <b>Microsoft Edge</b> (desktop or Android).
+    </div>
+
+    <button class="big-btn" id="startBtn">▶ Start</button>
+    <p style="font-size:13px;margin-top:14px">🎤 Needs microphone access and an internet connection. Tip: you can also type the word on a keyboard.</p>
+  </div>
+</div>
+
+<!-- ---------- Pause overlay ---------- -->
+<div class="overlay" id="pauseOverlay">
+  <div class="panel">
+    <h2>⏸ Paused</h2>
+    <p>Take a break!</p>
+    <button class="big-btn" id="resumeBtn">▶ Resume</button>
+    <button class="big-btn secondary" id="quitBtn">⟲ Start over</button>
+  </div>
+</div>
+
+<!-- ---------- Win / end overlay ---------- -->
+<div class="overlay" id="endOverlay">
+  <div class="panel">
+    <h1 id="endTitle">🎉 You did it!</h1>
+    <p id="endText">Every picture is in the green bucket!</p>
+    <div class="stats">
+      <div class="stat"><b id="statWords">0</b><small>pictures</small></div>
+      <div class="stat"><b id="statFirst">0</b><small>first try</small></div>
+      <div class="stat"><b id="statTime">0s</b><small>time</small></div>
+    </div>
+    <button class="big-btn" id="playAgainBtn">▶ Play again</button>
+  </div>
+</div>
+
+<script type="module">
+"use strict";
+
+/* =========================================================================
+   Picture Words — say-the-object game (speech-only judging).
+
+   Vocabulary + matching logic live in ./words.js so the test suite exercises
+   exactly the code that runs here. No external assets; the pictures are emoji
+   and the only network use is the browser's built-in speech recognition.
+   ========================================================================= */
+
+import { WORDS, matchesWord } from "./words.js";
+
+/* ---- DOM refs ---- */
+const $ = (id) => document.getElementById(id);
+const appEl = $("app");
+const cardEl = $("card");
+const ringEl = $("ringProgress");
+const secondsEl = $("seconds");
+const answerEl = $("answer");
+const heardEl = $("heard");
+const micStatusEl = $("micStatus");
+const micTextEl = $("micText");
+const greenChipsEl = $("greenChips"), redChipsEl = $("redChips");
+const greenCountEl = $("greenCount"), redCountEl = $("redCount");
+
+const RING_R = 92;
+const CIRC = 2 * Math.PI * RING_R;
+ringEl.style.strokeDasharray = CIRC;
+
+/* ---- Game state ---- */
+const state = {
+  cards: [],        // the deck of word items for this round
+  queue: [],        // indices not yet green, in presentation order
+  status: {},       // id -> 'pending' | 'red' | 'green'
+  current: null,    // current word item
+  timePerWord: 4000,
+  sayMiss: true,
+  running: false,
+  paused: false,
+  acceptingInput: false, // gate: should onresult count toward the current picture?
+  startTime: 0,
+  attempts: 0,
+  firstTry: 0,      // pictures mastered on their very first showing
+  timerId: null,
+};
+
+let category = "all";
+
+/* ---- Settings UI wiring ---- */
+function wireSegmented(containerId, onPick) {
+  const c = $(containerId);
+  c.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    [...c.children].forEach((b) => b.classList.remove("sel"));
+    btn.classList.add("sel");
+    onPick(btn);
+  });
+}
+wireSegmented("catSeg", (b) => (category = b.dataset.cat));
+wireSegmented("timeSeg", (b) => (state.timePerWord = parseInt(b.dataset.time, 10) * 1000));
+
+/* =========================================================================
+   Audio (Web Audio API) — short generated tones, no asset files.
+   ========================================================================= */
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) audioCtx = new AC();
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+function tone(freq, start, dur, type = "sine", gain = 0.18) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  o.connect(g); g.connect(audioCtx.destination);
+  const t = audioCtx.currentTime + start;
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function playSuccess() { ensureAudio(); tone(523, 0, .14); tone(659, .1, .14); tone(784, .2, .22); }
+function playMiss() { ensureAudio(); tone(311, 0, .18, "triangle", .22); tone(233, .14, .26, "triangle", .22); }
+
+/* =========================================================================
+   Speech synthesis — speak the correct word on a miss.
+   We mute recognition while it speaks so the mic can't hear the answer.
+   ========================================================================= */
+function speakWord(name, done) {
+  const synth = window.speechSynthesis;
+  if (!synth) { done(); return; }
+  try {
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(name);
+    u.lang = "en-US"; u.rate = 0.9; u.pitch = 1.1;
+    let called = false;
+    const finish = () => { if (!called) { called = true; done(); } };
+    u.onend = finish; u.onerror = finish;
+    setTimeout(finish, 1800);
+    synth.speak(u);
+  } catch (e) { done(); }
+}
+
+/* =========================================================================
+   Speech recognition lifecycle.
+   The engine stops on its own (silence / timeouts / one phrase on mobile),
+   so we keep a `wantListening` intent flag and restart it on `onend`.
+   ========================================================================= */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let wantListening = false;
+let recognitionActive = false;
+
+function initRecognition() {
+  if (!SR) return false;
+  recognition = new SR();
+  recognition.lang = "en-US";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 6;
+
+  recognition.onresult = handleResult;
+  recognition.onstart = () => { recognitionActive = true; };
+
+  recognition.onend = () => {
+    recognitionActive = false;
+    if (wantListening) {
+      try { recognition.start(); }
+      catch (e) {
+        setTimeout(() => {
+          if (wantListening && !recognitionActive) { try { recognition.start(); } catch (_) {} }
+        }, 250);
+      }
+    }
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      wantListening = false;
+      micTextEl.textContent = "Microphone blocked — allow it and reload.";
+      micStatusEl.classList.remove("live");
+    }
+    // 'no-speech' / 'aborted' / 'network' are transient; onend handles restart.
+  };
+  return true;
+}
+
+function startListening() {
+  if (!recognition) return;
+  wantListening = true;
+  micStatusEl.classList.add("live");
+  micTextEl.textContent = "Listening…";
+  if (!recognitionActive) { try { recognition.start(); } catch (e) {} }
+}
+function pauseListening() {
+  wantListening = false;
+  micStatusEl.classList.remove("live");
+  try { recognition && recognition.stop(); } catch (e) {}
+}
+
+function handleResult(event) {
+  if (!state.acceptingInput || !state.current) return;
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const res = event.results[i];
+    for (let j = 0; j < res.length; j++) {
+      if (matchesWord(res[j].transcript, state.current)) { resolveCorrect(); return; }
+    }
+    if (res[0]) heardEl.textContent = "heard: " + res[0].transcript.trim();
+  }
+}
+
+/* Keyboard fallback (useful for testing / accessibility): type the word.
+   A short buffer collects keystrokes and is matched the same way speech is. */
+let typeBuffer = "";
+let typeTimer = null;
+window.addEventListener("keydown", (e) => {
+  if (!state.running || state.paused || !state.acceptingInput || !state.current) return;
+  if (e.key === "Backspace") { typeBuffer = typeBuffer.slice(0, -1); return; }
+  if (e.key && e.key.length === 1 && /[a-zA-Z ]/.test(e.key)) {
+    typeBuffer += e.key.toLowerCase();
+    clearTimeout(typeTimer);
+    typeTimer = setTimeout(() => { typeBuffer = ""; }, 1500);
+    if (matchesWord(typeBuffer, state.current)) { typeBuffer = ""; resolveCorrect(); }
+  }
+});
+
+/* =========================================================================
+   Deck building
+   ========================================================================= */
+function buildDeck(cat) {
+  const pool = cat === "all" ? WORDS : WORDS.filter((w) => w.category === cat);
+  // Defensive copy so per-round mutation can't touch the shared vocabulary.
+  return pool.map((w) => ({ ...w }));
+}
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/* =========================================================================
+   Game flow
+   ========================================================================= */
+function startGame() {
+  ensureAudio();
+  state.cards = buildDeck(category);
+  state.status = {};
+  state.cards.forEach((c) => (state.status[c.id] = "pending"));
+  state.queue = shuffle(state.cards.map((_, i) => i));
+  state.attempts = 0;
+  state.firstTry = 0;
+  state.running = true;
+  state.paused = false;
+  state.startTime = performance.now();
+  typeBuffer = "";
+
+  renderBuckets();
+  $("startOverlay").classList.remove("show");
+  $("endOverlay").classList.remove("show");
+  appEl.classList.remove("hidden");
+
+  startListening();
+  nextWord();
+}
+
+function nextWord() {
+  if (!state.running) return;
+  if (state.queue.length === 0) { winGame(); return; }
+
+  state.current = state.cards[state.queue[0]];
+  state.attempts++;
+  typeBuffer = "";
+
+  cardEl.textContent = state.current.emoji;
+  cardEl.className = "card";
+  answerEl.className = "answer";
+  answerEl.innerHTML = "&nbsp;";
+  heardEl.innerHTML = "&nbsp;";
+  setRing(1);
+
+  state.acceptingInput = true;
+  startTimer();
+}
+
+function startTimer() {
+  clearTimer();
+  const duration = state.timePerWord;
+  const begin = performance.now();
+  function tick(now) {
+    if (!state.running || state.paused || !state.acceptingInput) return;
+    const remaining = Math.max(0, duration - (now - begin));
+    setRing(remaining / duration);
+    secondsEl.textContent = Math.ceil(remaining / 1000);
+    if (remaining <= 0) { resolveMiss(); return; }
+    state.timerId = requestAnimationFrame(tick);
+  }
+  state.timerId = requestAnimationFrame(tick);
+}
+function clearTimer() { if (state.timerId) cancelAnimationFrame(state.timerId); state.timerId = null; }
+
+function setRing(frac) {
+  ringEl.style.strokeDashoffset = CIRC * (1 - frac);
+  ringEl.style.stroke = frac > 0.5 ? "#6c5ce7" : frac > 0.25 ? "#ff9f43" : "#ff6b6b";
+}
+
+function resolveCorrect() {
+  if (!state.acceptingInput) return;
+  state.acceptingInput = false;
+  clearTimer();
+
+  const card = state.current;
+  const wasFirstShowing = state.status[card.id] === "pending";
+  if (wasFirstShowing) state.firstTry++;
+  state.status[card.id] = "green";
+  state.queue.shift();
+
+  cardEl.classList.add("correct");
+  answerEl.className = "answer correct";
+  answerEl.textContent = card.label;
+  playSuccess();
+  flyToBucket(card.emoji, ".bucket.green", "green");
+  renderBuckets();
+
+  setTimeout(nextWord, 650);
+}
+
+function resolveMiss() {
+  if (!state.acceptingInput) return;
+  state.acceptingInput = false;
+  clearTimer();
+
+  const card = state.current;
+  state.status[card.id] = "red";
+  state.queue.shift();
+  // Re-queue toward the back so it's retried later, then reshuffle the tail.
+  state.queue.push(state.cards.indexOf(card));
+  shuffle(state.queue);
+
+  cardEl.classList.add("miss");
+  answerEl.className = "answer miss";
+  answerEl.textContent = card.label;
+  playMiss();
+  flyToBucket(card.emoji, ".bucket.red", "red");
+  renderBuckets();
+
+  if (state.sayMiss) {
+    pauseListening();
+    speakWord(card.label, () => {
+      if (state.running && !state.paused) { startListening(); nextWord(); }
+    });
+  } else {
+    setTimeout(nextWord, 900);
+  }
+}
+
+function flyToBucket(emoji, bucketSelector, color) {
+  const bucket = document.querySelector(bucketSelector);
+  const cardRect = cardEl.getBoundingClientRect();
+  const bRect = bucket.getBoundingClientRect();
+  const chip = document.createElement("div");
+  chip.className = "fly-chip " + color;
+  chip.textContent = emoji;
+  const cx = cardRect.left + cardRect.width / 2;
+  const cy = cardRect.top + cardRect.height / 2;
+  chip.style.left = cx + "px";
+  chip.style.top = cy + "px";
+  document.body.appendChild(chip);
+  void chip.getBoundingClientRect();          // force reflow before transition
+  const dx = bRect.left + bRect.width / 2 - cx;
+  const dy = bRect.top + bRect.height / 2 - cy;
+  chip.style.transform = `translate(-50%,-50%) translate(${dx}px,${dy}px) scale(0.4)`;
+  chip.style.opacity = "0.15";
+  setTimeout(() => chip.remove(), 650);
+}
+
+function renderBuckets() {
+  const green = state.cards.filter((c) => state.status[c.id] === "green");
+  const red = state.cards.filter((c) => state.status[c.id] === "red");
+  greenCountEl.textContent = green.length;
+  redCountEl.textContent = red.length;
+  greenChipsEl.innerHTML = green.map((c) => `<div class="chip" title="${c.label}">${c.emoji}</div>`).join("");
+  redChipsEl.innerHTML = red.map((c) => `<div class="chip" title="${c.label}">${c.emoji}</div>`).join("");
+}
+
+/* ---- Pause / stop ---- */
+function pauseGame() {
+  if (!state.running || state.paused) return;
+  state.paused = true;
+  state.acceptingInput = false;
+  clearTimer();
+  pauseListening();
+  $("pauseOverlay").classList.add("show");
+}
+function resumeGame() {
+  $("pauseOverlay").classList.remove("show");
+  state.paused = false;
+  startListening();
+  nextWord();
+}
+function stopGame() {
+  state.running = false;
+  state.acceptingInput = false;
+  clearTimer();
+  pauseListening();
+  $("pauseOverlay").classList.remove("show");
+  appEl.classList.add("hidden");
+  $("startOverlay").classList.add("show");
+}
+
+function winGame() {
+  state.running = false;
+  state.acceptingInput = false;
+  clearTimer();
+  pauseListening();
+
+  const secs = Math.round((performance.now() - state.startTime) / 1000);
+  $("statWords").textContent = state.cards.length;
+  $("statFirst").textContent = state.firstTry;
+  $("statTime").textContent = secs + "s";
+  appEl.classList.add("hidden");
+  $("endOverlay").classList.add("show");
+  launchConfetti();
+}
+
+/* =========================================================================
+   Confetti (lightweight canvas burst)
+   ========================================================================= */
+const confettiCanvas = $("confetti");
+const cctx = confettiCanvas.getContext("2d");
+let confettiPieces = [], confettiRAF = null;
+function launchConfetti() {
+  confettiCanvas.width = innerWidth; confettiCanvas.height = innerHeight;
+  const colors = ["#6c5ce7", "#34c759", "#ff6b6b", "#ff9f43", "#54a0ff", "#feca57"];
+  confettiPieces = Array.from({ length: 160 }, () => ({
+    x: Math.random() * innerWidth,
+    y: -20 - Math.random() * innerHeight * 0.5,
+    r: 5 + Math.random() * 7,
+    c: colors[Math.floor(Math.random() * colors.length)],
+    vy: 2 + Math.random() * 4,
+    vx: -2 + Math.random() * 4,
+    rot: Math.random() * 6.28,
+    vr: -0.2 + Math.random() * 0.4,
+  }));
+  let frames = 0;
+  cancelAnimationFrame(confettiRAF);
+  (function draw() {
+    cctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+    confettiPieces.forEach((p) => {
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      cctx.save(); cctx.translate(p.x, p.y); cctx.rotate(p.rot);
+      cctx.fillStyle = p.c; cctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.5);
+      cctx.restore();
+    });
+    frames++;
+    if (frames < 260) confettiRAF = requestAnimationFrame(draw);
+    else cctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+  })();
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+const supported = initRecognition();
+if (!supported) {
+  $("unsupported").classList.remove("hidden");
+}
+
+$("startBtn").addEventListener("click", () => { state.sayMiss = $("sayMiss").checked; startGame(); });
+$("playAgainBtn").addEventListener("click", () => { $("endOverlay").classList.remove("show"); $("startOverlay").classList.add("show"); });
+$("pauseBtn").addEventListener("click", pauseGame);
+$("stopBtn").addEventListener("click", stopGame);
+$("resumeBtn").addEventListener("click", resumeGame);
+$("quitBtn").addEventListener("click", stopGame);
+</script>
+</body>
+</html>
