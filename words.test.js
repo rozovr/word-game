@@ -164,6 +164,21 @@ test("frog and toad are interchangeable for the frog picture", () => {
   assert.ok(matchesWord("a toad jumped", frog)); // filler around the keyword
 });
 
+/* Repetitions of a word (1–5×, spaced or glued) count as a hit. */
+test("repetitions of a word are accepted", () => {
+  const frog = findById("frog"), dog = findById("dog"), car = findById("car");
+  assert.ok(matchesWord("frog frog frog", frog));
+  assert.ok(matchesWord("dog dog", dog));
+  assert.ok(matchesWord("frogfrog", frog));
+  assert.ok(matchesWord("frogfrogfrog", frog));
+  assert.ok(matchesWord("frogfrogfrogfrogfrog", frog));
+  assert.ok(matchesWord("toadtoad", frog));
+  assert.ok(matchesWord("automobile automobile", car));
+  assert.ok(!matchesWord("catcat", dog));   // repeated wrong word still rejected
+  assert.ok(!matchesWord("cardog", car));   // non-repeat concatenation is not a hit
+  assert.ok(!matchesWord("cardog", dog));
+});
+
 /* =========================================================================
    4. Discrimination — clearly-wrong words are rejected (guards against a
       degenerate "accept everything" matcher passing test #1).

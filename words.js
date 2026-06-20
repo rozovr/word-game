@@ -94,12 +94,27 @@ function tokenEquals(a, b) {
   return a === b || stem(a) === stem(b);
 }
 
+/* True if `s` is `unit` repeated n times, 1 ≤ n ≤ maxRep, and nothing else.
+   Safe by construction — the WHOLE string must be the unit repeated, so
+   "monkey" never matches "key" (×2 = "keykey"). Kids naturally repeat the
+   word, and the recognizer may return that glued ("frogfrog") or as one
+   run-together token; this catches those. (Spaced repeats like
+   "frog frog frog" are already caught token-by-token.) */
+function isRepeatOf(s, unit, maxRep) {
+  if (!unit || !s || unit.length > s.length || s.length % unit.length !== 0) return false;
+  const n = s.length / unit.length;
+  if (n < 1 || n > (maxRep || 5)) return false;
+  return s === unit.repeat(n);
+}
+
 /* ---- The matcher ---------------------------------------------------------
    Does a (possibly messy) spoken transcript name `item`'s picture?
 
    - Multi-word accept entries ("alarm clock") match as a contiguous phrase.
    - Single-word entries match any token in the transcript, so leading
      articles / filler ("it's a dog", "the red car") still resolve.
+   - Repetition-tolerant: 1–5 repetitions of a word — glued ("frogfrog") or
+     run-together in one token — count as a hit, like the letter game.
    - Returns false for empty input.
 
    This is deliberately forgiving on the *accept* side (favouring no false
@@ -110,6 +125,7 @@ export function matchesWord(transcript, item) {
 
   const tokens = norm.split(" ");
   const padded = " " + norm + " ";
+  const glued = norm.replace(/ /g, "");
 
   for (const rawAlias of item.accept) {
     const alias = normalize(rawAlias);
@@ -123,6 +139,9 @@ export function matchesWord(transcript, item) {
       for (const tok of tokens) {
         if (tokenEquals(tok, alias)) return true;
       }
+      // Repetition-tolerant pass (1–5×), spaced-then-glued or single token.
+      if (isRepeatOf(glued, alias, 5)) return true;
+      for (const tok of tokens) if (isRepeatOf(tok, alias, 5)) return true;
     }
   }
   return false;
