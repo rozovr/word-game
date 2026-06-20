@@ -6,7 +6,13 @@ player says its name out loud before the timer runs out. Correct names drop into
 the green **Got it!** bucket; missed ones go to the red **Try again** bucket and
 come back later. The game ends when every picture is green.
 
-- **Pictures:** All, or filter to Animals / Home / Machines
+- **140 pictures** across 7 categories (animals, food, household, clothing, music,
+  machines, nature) — the core set plus ImageNet-derived words mapped to emoji.
+- **Choose-pictures menu** on the entry screen: a checkbox list (grouped by
+  category) to include/exclude each word, showing **this-week per-word stats**
+  (solve rate, and a ⚠ on words that are often missed despite a voice being heard,
+  or that match ambiguously) — so you can drop the ones that misfire.
+- **Repetition-tolerant**: say a word 1–5× (spaced or run together) and it counts.
 - **Time per picture:** 3 / 4 / 5 / 6 seconds
 - Speaks the correct word on a miss to reinforce learning
 - **Synonyms and similar classes count as equal** — a 🐸 is accepted as

@@ -202,6 +202,27 @@
   .stat small { color: #8a83b0; font-weight: 700; }
 
   #confetti { position: fixed; inset: 0; z-index: 99; pointer-events: none; }
+
+  /* ---------- Picture picker + word menu ---------- */
+  .picker-row { display: flex; align-items: center; gap: 10px; }
+  .picker-summary { flex: 1; font-weight: 700; color: #5a5280; }
+  .menu-tools { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; font-size: 14px; }
+  .chiplink { border: none; background: #efeaff; color: var(--accent); font-weight: 800;
+    padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 14px; }
+  .menu-tools .mini { font-weight: 700; color: #5a5280; display: flex; align-items: center; gap: 6px; }
+  .word-list { max-height: 50dvh; overflow-y: auto; border: 2px solid var(--ring-track);
+    border-radius: 16px; padding: 6px; }
+  .cat-head { font-weight: 800; color: var(--accent); text-transform: capitalize;
+    margin: 10px 6px 4px; font-size: 14px; letter-spacing: .5px; }
+  .wrow { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 12px; cursor: pointer; }
+  .wrow:active { background: #f3f0ff; }
+  .wrow input { width: 20px; height: 20px; accent-color: var(--green); flex: 0 0 auto; }
+  .wrow .em { font-size: 24px; width: 30px; text-align: center; }
+  .wrow .lbl { flex: 1; font-weight: 700; }
+  .wrow .stat { font-size: 12px; font-weight: 800; color: #8a83b0; white-space: nowrap; }
+  .wrow .stat.good { color: var(--green-dark); }
+  .wrow .stat.warn { color: var(--red-dark); }
+  .wrow.off { opacity: .5; }
 </style>
 </head>
 <body>
@@ -247,15 +268,13 @@
 <div class="overlay show" id="startOverlay">
   <div class="panel">
     <h1>🗣️ Say What You See!</h1>
-    <p>A picture pops up — say its name out loud before the timer runs out. Get them all into the green bucket to win! Synonyms count too (a 🐸 can be a “frog” or a “toad”).</p>
+    <p>A picture pops up — say its name out loud and <b>repeat it a few times</b> before the timer runs out. Get them all into the green bucket to win! Synonyms count too (a 🐸 can be a “frog” or a “toad”).</p>
 
     <div class="field">
       <label>Pictures</label>
-      <div class="segmented" id="catSeg">
-        <button data-cat="all" class="sel">🎲<br><small>All</small></button>
-        <button data-cat="animals">🐶<br><small>Animals</small></button>
-        <button data-cat="household">🪑<br><small>Home</small></button>
-        <button data-cat="machines">🚗<br><small>Machines</small></button>
+      <div class="picker-row">
+        <div class="picker-summary" id="pickSummary">All pictures</div>
+        <button class="chiplink" id="editWordsBtn" type="button" style="padding:10px 16px;font-size:16px">✏️ Choose</button>
       </div>
     </div>
 
@@ -307,6 +326,26 @@
   </div>
 </div>
 
+<!-- ---------- Choose-pictures menu (with weekly stats) ---------- -->
+<div class="overlay" id="wordsOverlay">
+  <div class="panel" style="text-align:left;width:min(540px,100%)">
+    <h2 style="text-align:center">🗂️ Choose pictures</h2>
+    <p id="weekSummary" style="text-align:center;margin:2px 0 8px">This week: no plays yet.</p>
+    <div class="menu-tools">
+      <button class="chiplink" id="selAllBtn" type="button">Select all</button>
+      <button class="chiplink" id="selNoneBtn" type="button">None</button>
+      <span style="flex:1"></span>
+      <label class="mini"><input type="checkbox" id="weakOnly"> ⚠ only</label>
+    </div>
+    <div class="word-list" id="wordList"></div>
+    <button class="big-btn" id="wordsDone" style="margin-top:14px">Done</button>
+    <p style="font-size:12px;text-align:center;color:#8a83b0;margin:10px 0 0">
+      Stats are from this week's plays in this browser. ⚠ = often missed even though
+      a voice was heard (or matched ambiguously) — a candidate to untick.
+    </p>
+  </div>
+</div>
+
 <script type="module">
 "use strict";
 
@@ -318,7 +357,7 @@
    and the only network use is the browser's built-in speech recognition.
    ========================================================================= */
 
-import { WORDS, matchesWord } from "./words.js";
+import { WORDS, CATEGORIES, matchesWord } from "./words.js";
 
 /* ---- DOM refs ---- */
 const $ = (id) => document.getElementById(id);
@@ -351,10 +390,10 @@ const state = {
   startTime: 0,
   attempts: 0,
   firstTry: 0,      // pictures mastered on their very first showing
+  lastHeard: "",        // most recent transcript heard for the current picture
+  matchTranscript: "",  // the transcript that resolved it correct
   timerId: null,
 };
-
-let category = "all";
 
 /* ---- Settings UI wiring ---- */
 function wireSegmented(containerId, onPick) {
@@ -367,8 +406,53 @@ function wireSegmented(containerId, onPick) {
     onPick(btn);
   });
 }
-wireSegmented("catSeg", (b) => (category = b.dataset.cat));
 wireSegmented("timeSeg", (b) => (state.timePerWord = parseInt(b.dataset.time, 10) * 1000));
+
+/* =========================================================================
+   On-device play stats (per word, per week) + which pictures are included.
+   Stored in localStorage. Real plays tell us which words misfire, and the
+   Choose-pictures menu lets a grown-up untick them.
+   ========================================================================= */
+const Stats = {
+  KEY: "pwStatsV1",
+  data: null,
+  load() { try { this.data = JSON.parse(localStorage.getItem(this.KEY)) || {}; } catch (e) { this.data = {}; } },
+  save() { try { localStorage.setItem(this.KEY, JSON.stringify(this.data)); } catch (e) {} },
+  week() {
+    const d = new Date();
+    const day = (d.getDay() + 6) % 7;
+    const monday = new Date(d); monday.setHours(0, 0, 0, 0); monday.setDate(d.getDate() - day);
+    const jan1 = new Date(monday.getFullYear(), 0, 1);
+    const wk = Math.floor((monday - jan1) / (7 * 864e5)) + 1;
+    return monday.getFullYear() + "-W" + String(wk).padStart(2, "0");
+  },
+  bucket() { if (!this.data) this.load(); const w = this.week(); return (this.data[w] = this.data[w] || {}); },
+  rec(id) { const b = this.bucket(); return (b[id] = b[id] || { shown: 0, solved: 0, first: 0, heardMiss: 0, amb: 0, samples: [] }); },
+  show(id) { this.rec(id).shown++; this.save(); },
+  solve(id, first, transcript) {
+    const r = this.rec(id); r.solved++; if (first) r.first++;
+    if (transcript && WORDS.some((w) => w.id !== id && matchesWord(transcript, w))) r.amb++;
+    this.save();
+  },
+  miss(id, heard) {
+    const r = this.rec(id);
+    if (heard) { r.heardMiss++; if (r.samples.length < 5 && !r.samples.includes(heard)) r.samples.push(heard); }
+    this.save();
+  },
+  forWord(id) { return this.bucket()[id] || { shown: 0, solved: 0, first: 0, heardMiss: 0, amb: 0, samples: [] }; },
+  weekTotals() { const b = this.bucket(); let shown = 0, solved = 0; for (const id in b) { shown += b[id].shown; solved += b[id].solved; } return { shown, solved }; },
+};
+
+const Inclusion = {
+  KEY: "pwExcludedV1",
+  excluded: new Set(),
+  load() { try { this.excluded = new Set(JSON.parse(localStorage.getItem(this.KEY)) || []); } catch (e) { this.excluded = new Set(); } },
+  save() { try { localStorage.setItem(this.KEY, JSON.stringify([...this.excluded])); } catch (e) {} },
+  has(id) { return !this.excluded.has(id); },
+  set(id, inc) { if (inc) this.excluded.delete(id); else this.excluded.add(id); this.save(); },
+  setAll(inc) { this.excluded = inc ? new Set() : new Set(WORDS.map((w) => w.id)); this.save(); },
+  count() { return WORDS.length - this.excluded.size; },
+};
 
 /* =========================================================================
    Audio (Web Audio API) — short generated tones, no asset files.
@@ -477,7 +561,9 @@ function handleResult(event) {
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
     for (let j = 0; j < res.length; j++) {
-      if (matchesWord(res[j].transcript, state.current)) { resolveCorrect(); return; }
+      const t = String(res[j].transcript).trim();
+      if (t) state.lastHeard = t;
+      if (matchesWord(res[j].transcript, state.current)) { state.matchTranscript = t; resolveCorrect(); return; }
     }
     if (res[0]) heardEl.textContent = "heard: " + res[0].transcript.trim();
   }
@@ -494,15 +580,15 @@ window.addEventListener("keydown", (e) => {
     typeBuffer += e.key.toLowerCase();
     clearTimeout(typeTimer);
     typeTimer = setTimeout(() => { typeBuffer = ""; }, 1500);
-    if (matchesWord(typeBuffer, state.current)) { typeBuffer = ""; resolveCorrect(); }
+    if (matchesWord(typeBuffer, state.current)) { state.matchTranscript = typeBuffer; typeBuffer = ""; resolveCorrect(); }
   }
 });
 
 /* =========================================================================
    Deck building
    ========================================================================= */
-function buildDeck(cat) {
-  const pool = cat === "all" ? WORDS : WORDS.filter((w) => w.category === cat);
+function buildDeck() {
+  const pool = WORDS.filter((w) => Inclusion.has(w.id));
   // Defensive copy so per-round mutation can't touch the shared vocabulary.
   return pool.map((w) => ({ ...w }));
 }
@@ -519,7 +605,8 @@ function shuffle(arr) {
    ========================================================================= */
 function startGame() {
   ensureAudio();
-  state.cards = buildDeck(category);
+  if (Inclusion.count() === 0) { openWordMenu(); return; }   // nothing to play
+  state.cards = buildDeck();
   state.status = {};
   state.cards.forEach((c) => (state.status[c.id] = "pending"));
   state.queue = shuffle(state.cards.map((_, i) => i));
@@ -546,6 +633,9 @@ function nextWord() {
   state.current = state.cards[state.queue[0]];
   state.attempts++;
   typeBuffer = "";
+  state.lastHeard = "";
+  state.matchTranscript = "";
+  Stats.show(state.current.id);
 
   cardEl.textContent = state.current.emoji;
   cardEl.className = "card";
@@ -587,6 +677,7 @@ function resolveCorrect() {
   const card = state.current;
   const wasFirstShowing = state.status[card.id] === "pending";
   if (wasFirstShowing) state.firstTry++;
+  Stats.solve(card.id, wasFirstShowing, state.matchTranscript);
   state.status[card.id] = "green";
   state.queue.shift();
 
@@ -606,6 +697,7 @@ function resolveMiss() {
   clearTimer();
 
   const card = state.current;
+  Stats.miss(card.id, state.lastHeard);
   state.status[card.id] = "red";
   state.queue.shift();
   // Re-queue toward the back so it's retried later, then reshuffle the tail.
@@ -734,14 +826,67 @@ function launchConfetti() {
 }
 
 /* =========================================================================
+   Choose-pictures menu (with this-week stats)
+   ========================================================================= */
+function wordStatBadge(id) {
+  const r = Stats.forWord(id);
+  if (!r.shown) return { text: "", cls: "" };
+  const recall = r.solved / r.shown;
+  const warn = (r.shown >= 3 && recall < 0.6) || r.amb >= 2;
+  return { text: `${Math.round(recall * 100)}% (${r.solved}/${r.shown})` + (warn ? " ⚠" : ""),
+           cls: warn ? "warn" : (recall >= 0.8 ? "good" : "") };
+}
+function updatePickSummary() {
+  const n = Inclusion.count(), m = WORDS.length;
+  $("pickSummary").textContent = n === m ? `All ${m} pictures` : `${n} of ${m} pictures`;
+}
+function renderWordMenu() {
+  const weakOnly = $("weakOnly").checked;
+  const byCat = {};
+  for (const w of WORDS) (byCat[w.category] = byCat[w.category] || []).push(w);
+  let html = "";
+  for (const cat of CATEGORIES) {
+    const rows = (byCat[cat] || []).map((w) => {
+      const b = wordStatBadge(w.id);
+      if (weakOnly && !b.text.includes("⚠")) return "";
+      const inc = Inclusion.has(w.id);
+      return `<label class="wrow ${inc ? "" : "off"}" data-id="${w.id}">` +
+        `<input type="checkbox" ${inc ? "checked" : ""}>` +
+        `<span class="em">${w.emoji}</span><span class="lbl">${w.label}</span>` +
+        `<span class="stat ${b.cls}">${b.text}</span></label>`;
+    }).join("");
+    if (rows.trim()) html += `<div class="cat-head">${cat}</div>` + rows;
+  }
+  $("wordList").innerHTML = html || `<p style="text-align:center;color:#8a83b0;padding:20px">Nothing to show — play a bit first.</p>`;
+  $("wordList").querySelectorAll(".wrow").forEach((row) => {
+    const cb = row.querySelector("input");
+    cb.addEventListener("change", () => { Inclusion.set(row.dataset.id, cb.checked); row.classList.toggle("off", !cb.checked); updatePickSummary(); });
+  });
+  const t = Stats.weekTotals();
+  $("weekSummary").textContent = t.shown
+    ? `This week: ${t.shown} tries, ${Math.round(t.solved / t.shown * 100)}% got`
+    : "This week: no plays yet.";
+}
+function openWordMenu() { renderWordMenu(); $("startOverlay").classList.remove("show"); $("wordsOverlay").classList.add("show"); }
+function closeWordMenu() { $("wordsOverlay").classList.remove("show"); $("startOverlay").classList.add("show"); updatePickSummary(); }
+
+/* =========================================================================
    Boot
    ========================================================================= */
 const supported = initRecognition();
 if (!supported) {
   $("unsupported").classList.remove("hidden");
 }
+Stats.load();
+Inclusion.load();
+updatePickSummary();
 
 $("startBtn").addEventListener("click", () => { state.sayMiss = $("sayMiss").checked; startGame(); });
+$("editWordsBtn").addEventListener("click", openWordMenu);
+$("wordsDone").addEventListener("click", closeWordMenu);
+$("selAllBtn").addEventListener("click", () => { Inclusion.setAll(true); renderWordMenu(); updatePickSummary(); });
+$("selNoneBtn").addEventListener("click", () => { Inclusion.setAll(false); renderWordMenu(); updatePickSummary(); });
+$("weakOnly").addEventListener("change", renderWordMenu);
 $("playAgainBtn").addEventListener("click", () => { $("endOverlay").classList.remove("show"); $("startOverlay").classList.add("show"); });
 $("pauseBtn").addEventListener("click", pauseGame);
 $("stopBtn").addEventListener("click", stopGame);
