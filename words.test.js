@@ -20,7 +20,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { WORDS, CATEGORIES, normalize, matchesWord, findById } from "./words.js";
+import { WORDS, CATEGORIES, normalize, matchesWord, findById, isSkip } from "./words.js";
 
 /* ---- Ground-truth corpus -------------------------------------------------
    id -> list of utterances that MUST be accepted for that picture.          */
@@ -177,6 +177,17 @@ test("repetitions of a word are accepted", () => {
   assert.ok(!matchesWord("catcat", dog));   // repeated wrong word still rejected
   assert.ok(!matchesWord("cardog", car));   // non-repeat concatenation is not a hit
   assert.ok(!matchesWord("cardog", dog));
+});
+
+/* "skip" / "I don't know" are detected and never collide with a real answer. */
+test("skip phrases are detected; real answers are not skips", () => {
+  ["skip", "Skip!", "skip skip", "pass", "next", "dunno", "i don't know",
+   "I dunno", "no idea", "not sure", "i give up"].forEach((u) =>
+    assert.ok(isSkip(u), `"${u}" should be a skip`));
+  ["", "frog", "a dog", "toad", "fire truck", "school bus"].forEach((u) =>
+    assert.ok(!isSkip(u), `"${u}" should NOT be a skip`));
+  for (const w of WORDS) for (const a of w.accept)
+    assert.ok(!isSkip(a), `accepted word "${a}" (${w.id}) wrongly triggers skip`);
 });
 
 /* =========================================================================

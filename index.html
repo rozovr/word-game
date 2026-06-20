@@ -103,6 +103,10 @@
   .mic.live .dot { background: var(--green); animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 0 #34c75966 } 50%{ box-shadow: 0 0 0 10px #34c75900 } }
   .heard { color: var(--accent); font-style: italic; min-height: 20px; }
+  .skip-btn { border: none; cursor: pointer; background: #ece9ff; color: var(--accent);
+    font-weight: 800; font-size: 15px; padding: 8px 20px; border-radius: 999px;
+    box-shadow: 0 3px 0 #cfc8f5; transition: transform .08s ease; }
+  .skip-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #cfc8f5; }
 
   /* ---------- Buckets ---------- */
   .buckets { flex: 0 0 auto; display: flex; gap: 12px; padding: 10px 14px 16px; }
@@ -250,6 +254,7 @@
     <div class="answer" id="answer">&nbsp;</div>
     <div class="mic" id="micStatus"><span class="dot"></span><span id="micText">Listening…</span></div>
     <div class="heard" id="heard">&nbsp;</div>
+    <button class="skip-btn" id="skipBtn" title="Don't know? Say “skip”">⏭ Skip</button>
   </main>
 
   <div class="buckets">
@@ -298,7 +303,7 @@
     </div>
 
     <button class="big-btn" id="startBtn">▶ Start</button>
-    <p style="font-size:13px;margin-top:14px">🎤 Needs microphone access and an internet connection. Tip: you can also type the word on a keyboard.</p>
+    <p style="font-size:13px;margin-top:14px">🎤 Needs microphone access and an internet connection. Don't know one? Say <b>“skip”</b> (or tap Skip). You can also type the word.</p>
   </div>
 </div>
 
@@ -357,7 +362,7 @@
    and the only network use is the browser's built-in speech recognition.
    ========================================================================= */
 
-import { WORDS, CATEGORIES, matchesWord } from "./words.js";
+import { WORDS, CATEGORIES, matchesWord, isSkip } from "./words.js";
 
 /* ---- DOM refs ---- */
 const $ = (id) => document.getElementById(id);
@@ -439,7 +444,8 @@ const Stats = {
     if (heard) { r.heardMiss++; if (r.samples.length < 5 && !r.samples.includes(heard)) r.samples.push(heard); }
     this.save();
   },
-  forWord(id) { return this.bucket()[id] || { shown: 0, solved: 0, first: 0, heardMiss: 0, amb: 0, samples: [] }; },
+  skip(id) { const r = this.rec(id); r.skipped = (r.skipped || 0) + 1; this.save(); }, // "don't know" ≠ a recognizer miss
+  forWord(id) { return this.bucket()[id] || { shown: 0, solved: 0, first: 0, heardMiss: 0, amb: 0, samples: [], skipped: 0 }; },
   weekTotals() { const b = this.bucket(); let shown = 0, solved = 0; for (const id in b) { shown += b[id].shown; solved += b[id].solved; } return { shown, solved }; },
 };
 
@@ -562,6 +568,7 @@ function handleResult(event) {
     const res = event.results[i];
     for (let j = 0; j < res.length; j++) {
       const t = String(res[j].transcript).trim();
+      if (isSkip(t)) { resolveMiss("skip"); return; }       // "skip" / "I don't know"
       if (t) state.lastHeard = t;
       if (matchesWord(res[j].transcript, state.current)) { state.matchTranscript = t; resolveCorrect(); return; }
     }
@@ -575,11 +582,13 @@ let typeBuffer = "";
 let typeTimer = null;
 window.addEventListener("keydown", (e) => {
   if (!state.running || state.paused || !state.acceptingInput || !state.current) return;
+  if (e.key === "Escape") { resolveMiss("skip"); return; }   // skip the current picture
   if (e.key === "Backspace") { typeBuffer = typeBuffer.slice(0, -1); return; }
   if (e.key && e.key.length === 1 && /[a-zA-Z ]/.test(e.key)) {
     typeBuffer += e.key.toLowerCase();
     clearTimeout(typeTimer);
     typeTimer = setTimeout(() => { typeBuffer = ""; }, 1500);
+    if (isSkip(typeBuffer)) { typeBuffer = ""; resolveMiss("skip"); return; }
     if (matchesWord(typeBuffer, state.current)) { state.matchTranscript = typeBuffer; typeBuffer = ""; resolveCorrect(); }
   }
 });
@@ -691,13 +700,16 @@ function resolveCorrect() {
   setTimeout(nextWord, 650);
 }
 
-function resolveMiss() {
+function resolveMiss(reason) {
   if (!state.acceptingInput) return;
   state.acceptingInput = false;
   clearTimer();
 
   const card = state.current;
-  Stats.miss(card.id, state.lastHeard);
+  const skipped = reason === "skip";
+  // A skip is a deliberate "don't know" — count it separately, NOT as a
+  // recognizer miss, so it doesn't flag the word as ⚠ in the stats.
+  if (skipped) Stats.skip(card.id); else Stats.miss(card.id, state.lastHeard);
   state.status[card.id] = "red";
   state.queue.shift();
   // Re-queue toward the back so it's retried later, then reshuffle the tail.
@@ -706,7 +718,7 @@ function resolveMiss() {
 
   cardEl.classList.add("miss");
   answerEl.className = "answer miss";
-  answerEl.textContent = card.label;
+  answerEl.textContent = (skipped ? "Skipped — " : "") + card.label;
   playMiss();
   flyToBucket(card.emoji, ".bucket.red", "red");
   renderBuckets();
@@ -888,6 +900,7 @@ $("selAllBtn").addEventListener("click", () => { Inclusion.setAll(true); renderW
 $("selNoneBtn").addEventListener("click", () => { Inclusion.setAll(false); renderWordMenu(); updatePickSummary(); });
 $("weakOnly").addEventListener("change", renderWordMenu);
 $("playAgainBtn").addEventListener("click", () => { $("endOverlay").classList.remove("show"); $("startOverlay").classList.add("show"); });
+$("skipBtn").addEventListener("click", () => { if (state.running && !state.paused && state.acceptingInput && state.current) resolveMiss("skip"); });
 $("pauseBtn").addEventListener("click", pauseGame);
 $("stopBtn").addEventListener("click", stopGame);
 $("resumeBtn").addEventListener("click", resumeGame);

@@ -251,3 +251,19 @@ export function matchesWord(transcript, item) {
 export function findById(id) {
   return WORDS.find((w) => w.id === id) || null;
 }
+
+/* ---- "I don't know" / skip detection -------------------------------------
+   A player may say "skip" (or "pass", "next", "dunno", "I don't know") to give
+   up on the current picture. Checked BEFORE matchesWord, and none of these
+   collide with a picture's accepted word, so it never hijacks a real answer.
+   Repetition-tolerant via the token scan ("skip skip" works).                */
+const SKIP_WORDS = new Set(["skip", "skipped", "skips", "pass", "next", "dunno"]);
+const SKIP_PHRASES = ["dont know", "don't know", "do not know", "no idea", "not sure", "give up"];
+export function isSkip(transcript) {
+  const norm = normalize(transcript);
+  if (!norm) return false;
+  for (const tok of norm.split(" ")) if (SKIP_WORDS.has(tok)) return true;
+  const padded = " " + norm + " ";
+  for (const p of SKIP_PHRASES) if (padded.includes(" " + normalize(p) + " ")) return true;
+  return false;
+}
