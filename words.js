@@ -252,6 +252,19 @@ export function findById(id) {
   return WORDS.find((w) => w.id === id) || null;
 }
 
+/* ---- Vosk decode grammar --------------------------------------------------
+   Closed vocabulary for the in-browser Vosk recognizer (vosk.js WASM): every
+   accept token of every word + the skip vocabulary + [unk]. Constraining
+   decoding to this list is what pushes false negatives near zero (offline
+   eval on the same model: 1.0% tuning / 1.0% held-out voices vs ~12% open). */
+export function buildGrammar() {
+  const set = new Set();
+  for (const w of WORDS) for (const a of w.accept) set.add(a);
+  for (const s of ["skip", "skipped", "skips", "pass", "next", "dunno",
+                   "don't", "know", "no", "idea", "not", "sure", "give", "up"]) set.add(s);
+  return [...set].sort().concat(["[unk]"]);
+}
+
 /* ---- "I don't know" / skip detection -------------------------------------
    A player may say "skip" (or "pass", "next", "dunno", "I don't know") to give
    up on the current picture. Checked BEFORE matchesWord, and none of these

@@ -228,6 +228,7 @@
   .wrow .stat.warn { color: var(--red-dark); }
   .wrow.off { opacity: .5; }
 </style>
+<script src="vosk.js" defer></script>
 </head>
 <body>
 
@@ -362,7 +363,7 @@
    and the only network use is the browser's built-in speech recognition.
    ========================================================================= */
 
-import { WORDS, CATEGORIES, matchesWord, isSkip } from "./words.js";
+import { WORDS, CATEGORIES, matchesWord, isSkip, buildGrammar } from "./words.js";
 
 /* ---- DOM refs ---- */
 const $ = (id) => document.getElementById(id);
@@ -549,30 +550,126 @@ function initRecognition() {
   return true;
 }
 
+/* =========================================================================
+   In-browser Vosk backend (vosk.js WASM + bundled model, ~40MB one-time
+   download, cached by the browser). Decodes against buildGrammar() — same
+   trick as the Android app: closed vocabulary → near-zero false negatives,
+   fully offline after the first load. Web Speech stays as instant fallback
+   while the model loads or if WASM/mic audio graph isn't available.
+   ========================================================================= */
+const VoskWeb = {
+  ready: false, failed: false, running: false,
+  _model: null, _rec: null, _ctx: null, _node: null, _src: null, _stream: null, _loading: false,
+
+  supported() {
+    return !!(window.WebAssembly && navigator.mediaDevices && (window.AudioContext || window.webkitAudioContext));
+  },
+
+  load() {
+    if (this._loading || this.ready || this.failed || !this.supported()) return;
+    this._loading = true;
+    const attempt = async () => {
+      if (!window.Vosk) { setTimeout(attempt, 400); return; } // vosk.js is a deferred script
+      try {
+        micTextEl.textContent = "Preparing offline voice model…";
+        this._model = await Vosk.createModel("vosk-model-small-en-us-0.15.tar.gz");
+        this.ready = true;
+        micTextEl.textContent = wantListening ? "Listening…" : "…";
+        // Hot-swap: if the game is already listening via Web Speech, upgrade.
+        if (wantListening) { try { recognition && recognition.stop(); } catch (e) {} this.start(); }
+      } catch (e) {
+        this._err = String(e && e.message || e);
+        this.failed = true; // silently stay on Web Speech
+      }
+    };
+    attempt();
+  },
+
+  async start() {
+    if (!this.ready || this.running) return;
+    try {
+      if (!this._stream) {
+        this._stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, channelCount: 1, sampleRate: 16000 },
+        });
+        const AC = window.AudioContext || window.webkitAudioContext;
+        this._ctx = new AC();
+        this._rec = new this._model.KaldiRecognizer(this._ctx.sampleRate, JSON.stringify(buildGrammar()));
+        this._rec.on("result", (m) => { this._pulse = Date.now(); const t = m.result && m.result.text; if (t) onTranscriptText(t); });
+        this._rec.on("partialresult", (m) => { this._pulse = Date.now(); const t = m.result && m.result.partial; if (t) onTranscriptText(t); });
+        this._src = this._ctx.createMediaStreamSource(this._stream);
+        this._node = this._ctx.createScriptProcessor(4096, 1, 1);
+        this._node.onaudioprocess = (ev) => { if (this.running) { try { this._rec.acceptWaveform(ev.inputBuffer); } catch (e) {} } };
+        this._src.connect(this._node);
+        this._node.connect(this._ctx.destination);
+      }
+      if (this._ctx.state === "suspended") this._ctx.resume();
+      this.running = true;
+      this._pulse = Date.now();
+      // Self-healing: if the worker pipeline goes silent (no result/partial
+      // events at all) while we're supposed to be listening, rebuild it.
+      if (!this._watch) {
+        this._watch = setInterval(() => {
+          if (this.running && Date.now() - (this._pulse || 0) > 6000) this._rebuild();
+        }, 3000);
+      }
+    } catch (e) {
+      this._err = String(e && e.message || e);
+      this.failed = true; // mic/audio-graph failure → fall back to Web Speech
+      if (wantListening && recognition && !recognitionActive) { try { recognition.start(); } catch (_) {} }
+    }
+  },
+
+  _rebuild() {
+    try { this._node && this._node.disconnect(); } catch (e) {}
+    try { this._src && this._src.disconnect(); } catch (e) {}
+    try { this._ctx && this._ctx.close(); } catch (e) {}
+    try { this._stream && this._stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    try { this._rec && this._rec.remove(); } catch (e) {}
+    this._node = this._src = this._ctx = this._stream = this._rec = null;
+    this.running = false;
+    this.start();
+  },
+
+  stop() {
+    this.running = false;
+    if (this._ctx && this._ctx.state === "running") { try { this._ctx.suspend(); } catch (e) {} }
+  },
+};
+window.VoskWeb = VoskWeb; // module scope — exposed for debugging / e2e tests
+
 function startListening() {
-  if (!recognition) return;
   wantListening = true;
   micStatusEl.classList.add("live");
   micTextEl.textContent = "Listening…";
-  if (!recognitionActive) { try { recognition.start(); } catch (e) {} }
+  if (VoskWeb.ready && !VoskWeb.failed) { VoskWeb.start(); return; }
+  if (recognition && !recognitionActive) { try { recognition.start(); } catch (e) {} }
 }
 function pauseListening() {
   wantListening = false;
   micStatusEl.classList.remove("live");
+  VoskWeb.stop();
   try { recognition && recognition.stop(); } catch (e) {}
 }
 
+/* Shared by both recognition backends (Web Speech + in-browser Vosk).
+   Returns true when the utterance resolved the current picture. */
+function onTranscriptText(raw) {
+  if (!state.acceptingInput || !state.current) return false;
+  const t = String(raw).trim();
+  if (isSkip(t)) { resolveMiss("skip"); return true; }       // "skip" / "I don't know"
+  if (t) state.lastHeard = t;
+  if (matchesWord(raw, state.current)) { state.matchTranscript = t; resolveCorrect(); return true; }
+  if (t) heardEl.textContent = "heard: " + t;
+  return false;
+}
+
 function handleResult(event) {
-  if (!state.acceptingInput || !state.current) return;
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const res = event.results[i];
     for (let j = 0; j < res.length; j++) {
-      const t = String(res[j].transcript).trim();
-      if (isSkip(t)) { resolveMiss("skip"); return; }       // "skip" / "I don't know"
-      if (t) state.lastHeard = t;
-      if (matchesWord(res[j].transcript, state.current)) { state.matchTranscript = t; resolveCorrect(); return; }
+      if (onTranscriptText(res[j].transcript)) return;
     }
-    if (res[0]) heardEl.textContent = "heard: " + res[0].transcript.trim();
   }
 }
 
@@ -885,8 +982,9 @@ function closeWordMenu() { $("wordsOverlay").classList.remove("show"); $("startO
 /* =========================================================================
    Boot
    ========================================================================= */
-const supported = initRecognition();
-if (!supported) {
+const srSupported = initRecognition();
+VoskWeb.load();   // background: in-browser offline recognizer (grammar-constrained)
+if (!srSupported && !VoskWeb.supported()) {
   $("unsupported").classList.remove("hidden");
 }
 Stats.load();
